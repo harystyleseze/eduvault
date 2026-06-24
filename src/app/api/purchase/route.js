@@ -3,6 +3,7 @@ export const dynamic = "force-dynamic";
 import { getDb } from '@/lib/mongodb'
 import { NextResponse } from 'next/server'
 import { getUserFromCookie } from "@/lib/api/auth";
+import { createEntitlement } from '@/lib/entitlement';
 
 export async function GET(req) {
   try {
@@ -49,6 +50,11 @@ export async function POST(req) {
       .collection('purchases')
       .findOne({ buyerAddress, materialId });
     if (existing) {
+      // Ensure entitlement cache is populated even on re-purchase attempt
+      await createEntitlement(materialId, buyerAddress, {
+        purchaseId: String(existing._id),
+        transactionHash: existing.transactionHash,
+      });
       return NextResponse.json(
         { message: 'Already purchased', purchase: existing, transactionHash: existing.transactionHash },
         { status: 200 }
@@ -67,6 +73,13 @@ export async function POST(req) {
     };
 
     const result = await db.collection('purchases').insertOne(purchaseRecord);
+
+    // Create entitlement record immediately so access is available without
+    // waiting for the off-chain indexer to process the on-chain event.
+    await createEntitlement(materialId, buyerAddress, {
+      purchaseId: String(result.insertedId),
+      transactionHash: transactionHash || null,
+    });
 
     return NextResponse.json(
       { success: true, purchaseId: result.insertedId, purchase: { ...purchaseRecord, _id: result.insertedId } },

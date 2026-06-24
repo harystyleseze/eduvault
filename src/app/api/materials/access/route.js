@@ -1,5 +1,3 @@
-// optional on-chain entitlement verification is intentionally loaded lazily
-
 export const dynamic = 'force-dynamic';
 
 export async function accessStatus(db, materialId, buyerAddress) {
@@ -14,15 +12,22 @@ export async function accessStatus(db, materialId, buyerAddress) {
 
   const buyer = String(buyerAddress).toLowerCase();
 
-  // Check purchases (single lookup) and determine settled vs pending
+  // 1. Check entitlement cache first (fast path)
+  const cached = await db.collection('entitlement_cache').findOne({
+    materialId,
+    buyerAddress: buyer,
+  });
+  if (cached?.active) {
+    return { status: 'active', source: cached.source || 'cache' };
+  }
+
+  // 2. Check purchases DB for settled status
   const purchase = await db.collection('purchases').findOne({ materialId, buyerAddress: buyer });
   if (purchase) {
     if (purchase.status === 'settled') return { status: 'active', source: 'purchases-db' };
     return { status: 'pending', source: 'purchases-db' };
   }
 
-  // Fallback: skip chain verification during unit tests or when entitlement
-  // helpers are not available; callers should treat source accordingly.
   return { status: 'not_purchased', source: 'unknown' };
 }
 

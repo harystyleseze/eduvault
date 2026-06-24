@@ -4,6 +4,8 @@ import { getDb } from "@/lib/mongodb";
 import { NextResponse } from "next/server";
 import { ObjectId } from "mongodb";
 import { getUserFromCookie } from "@/lib/api/auth";
+import { verifyEntitlement } from "@/lib/entitlement";
+import { getIpfsUrl } from "@/lib/config/chain";
 
 export async function GET(req, { params }) {
   try {
@@ -34,14 +36,9 @@ export async function GET(req, { params }) {
 
     if (!hasAccess) {
       if (material.price > 0) {
-        const entitlement = await db.collection("purchases").findOne({
-          buyerAddress: userAddress,
-          materialId: id,
-          status: "confirmed",
-        });
-        if (entitlement) {
-          hasAccess = true;
-        }
+        // Use the centralized entitlement verification (cache → DB → chain)
+        const entitlement = await verifyEntitlement(id, userAddress);
+        hasAccess = entitlement.hasAccess;
       } else if (material.visibility === "public") {
         hasAccess = true;
       }
@@ -74,9 +71,6 @@ export async function GET(req, { params }) {
     );
   } catch (error) {
     console.error("Download Gate Error:", error);
-    return NextResponse.json(
-      { error: "Internal Server Error" },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });
   }
 }
